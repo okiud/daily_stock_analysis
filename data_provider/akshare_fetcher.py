@@ -238,6 +238,40 @@ def _is_hk_code(stock_code: str) -> bool:
     return code.isdigit() and len(code) == 5
 
 
+def _is_open_fund_code(fund_code: str) -> bool:
+    """
+    判断代码是否为场外开放式基金
+    
+    场外基金代码规则：
+    - 6位数字代码
+    - 常见前缀：00xxxx, 01xxxx, 02xxxx, 03xxxx, 04xxxx, 05xxxx, 07xxxx
+    - 排除场内ETF代码（51/52/56/58/15/16/18开头）
+    - 排除A股代码（000/001/002/003/300/600/601/603/605/688开头）
+    
+    Args:
+        fund_code: 基金代码
+        
+    Returns:
+        True 表示是场外开放式基金代码
+    """
+    if not fund_code.isdigit() or len(fund_code) != 6:
+        return False
+    
+    # 排除场内ETF（已有专门处理）
+    if _is_etf_code(fund_code):
+        return False
+    
+    # 排除A股代码
+    a_stock_prefixes = ('000', '001', '002', '003', '300', '600', '601', '603', '605', '688')
+    if fund_code.startswith(a_stock_prefixes):
+        return False
+    
+    # 常见场外基金代码前缀
+    # 00/01/02/03/04/05/07 开头的通常是场外基金
+    open_fund_prefixes = ('00', '01', '02', '03', '04', '05', '07')
+    return fund_code.startswith(open_fund_prefixes)
+
+
 class AkshareFetcher(BaseFetcher):
     """
     Akshare 数据源实现
@@ -316,9 +350,11 @@ class AkshareFetcher(BaseFetcher):
         根据代码类型自动选择 API：
         - 普通股票：使用 ak.stock_zh_a_hist()
         - ETF 基金：使用 ak.fund_etf_hist_em()
+        - 港股：使用 ak.stock_hk_hist()
+        - 场外基金：使用 ak.fund_open_fund_info_em()
         
         流程：
-        1. 判断代码类型（股票/ETF）
+        1. 判断代码类型（股票/ETF/港股/场外基金）
         2. 设置随机 User-Agent
         3. 执行速率限制（随机休眠）
         4. 调用对应的 akshare API
@@ -329,6 +365,8 @@ class AkshareFetcher(BaseFetcher):
             return self._fetch_hk_data(stock_code, start_date, end_date)
         elif _is_etf_code(stock_code):
             return self._fetch_etf_data(stock_code, start_date, end_date)
+        elif _is_open_fund_code(stock_code):
+            return self._fetch_open_fund_data(stock_code, start_date, end_date)
         else:
             return self._fetch_stock_data(stock_code, start_date, end_date)
     
@@ -512,6 +550,92 @@ class AkshareFetcher(BaseFetcher):
             
             raise DataFetchError(f"Akshare 获取港股数据失败: {e}") from e
     
+    def _fetch_open_fund_data(self, fund_code: str, start_date: str, end_date: str) -> pd.DataFrame:
+        """
+        获取场外开放式基金历史净值数据
+        
+        数据来源：ak.fund_open_fund_info_em()
+        
+        场外基金特点：
+        - 只有净值数据，没有分时行情
+        - 数据每日更新一次（交易日16:00-23:00）
+        - 返回：净值日期、单位净值、日增长率
+        
+        Args:
+            fund_code: 场外基金代码，如 '020973'
+            start_date: 开始日期，格式 'YYYY-MM-DD'
+            end_date: 结束日期，格式 'YYYY-MM-DD'
+            
+        Returns:
+            基金历史净值 DataFrame（已转换为标准列名格式）
+        """
+        import akshare as ak
+        
+        # 防封禁策略 1: 随机 User-Agent
+        self._set_random_user_agent()
+        
+        # 防封禁策略 2: 强制休眠
+        self._enforce_rate_limit()
+        
+        logger.info(f"[API调用] ak.fund_open_fund_info_em(symbol={fund_code}, indicator='单位净值走势')")
+        
+        try:
+            import time as _time
+            api_start = _time.time()
+            
+            # 调用 akshare 获取场外基金单位净值走势
+            df = ak.fund_open_fund_info_em(
+                symbol=fund_code,
+                indicator="单位净值走势"
+            )
+            
+            api_elapsed = _time.time() - api_start
+            
+            # 记录返回数据摘要
+            if df is not None and not df.empty:
+                logger.info(f"[API返回] ak.fund_open_fund_info_em 成功: 返回 {len(df)} 行数据, 耗时 {api_elapsed:.2f}s")
+                logger.info(f"[API返回] 列名: {list(df.columns)}")
+                logger.info(f"[API返回] 日期范围: {df['净值日期'].iloc[0]} ~ {df['净值日期'].iloc[-1]}")
+                logger.debug(f"[API返回] 最新3条数据:\n{df.tail(3).to_string()}")
+                
+                # 转换为标准格式（与股票数据格式对齐）
+                # 原始列：净值日期, 单位净值, 日增长率
+                # 目标列：日期, 开盘, 收盘, 最高, 最低, 成交量, 成交额, 涨跌幅
+                df_std = pd.DataFrame()
+                df_std['日期'] = df['净值日期']
+                df_std['收盘'] = df['单位净值']
+                df_std['开盘'] = df['单位净值']  # 场外基金没有开盘价，使用净值代替
+                df_std['最高'] = df['单位净值']  # 场外基金没有最高价，使用净值代替
+                df_std['最低'] = df['单位净值']  # 场外基金没有最低价，使用净值代替
+                df_std['涨跌幅'] = df['日增长率']
+                df_std['成交量'] = 0  # 场外基金没有成交量
+                df_std['成交额'] = 0  # 场外基金没有成交额
+                
+                # 按日期筛选
+                df_std['日期'] = pd.to_datetime(df_std['日期'])
+                start_dt = pd.to_datetime(start_date)
+                end_dt = pd.to_datetime(end_date)
+                df_std = df_std[(df_std['日期'] >= start_dt) & (df_std['日期'] <= end_dt)]
+                df_std['日期'] = df_std['日期'].dt.strftime('%Y-%m-%d')
+                
+                logger.info(f"[场外基金] {fund_code} 筛选后数据: {len(df_std)} 行 ({start_date} ~ {end_date})")
+                
+                return df_std
+            else:
+                logger.warning(f"[API返回] ak.fund_open_fund_info_em 返回空数据, 耗时 {api_elapsed:.2f}s")
+                return pd.DataFrame()
+            
+        except Exception as e:
+            error_msg = str(e).lower()
+            
+            # 检测反爬封禁
+            if any(keyword in error_msg for keyword in ['banned', 'blocked', '频率', 'rate', '限制']):
+                logger.warning(f"检测到可能被封禁: {e}")
+                raise RateLimitError(f"Akshare 可能被限流: {e}") from e
+            
+            raise DataFetchError(f"Akshare 获取场外基金数据失败: {e}") from e
+
+    
     def _normalize_data(self, df: pd.DataFrame, stock_code: str) -> pd.DataFrame:
         """
         标准化 Akshare 数据
@@ -556,9 +680,11 @@ class AkshareFetcher(BaseFetcher):
         根据代码类型自动选择数据源：
         - 普通股票：ak.stock_zh_a_spot_em()
         - ETF 基金：ak.fund_etf_spot_em()
+        - 港股：ak.stock_hk_spot_em()
+        - 场外基金：ak.fund_open_fund_daily_em()
         
         Args:
-            stock_code: 股票/ETF代码
+            stock_code: 股票/ETF/基金代码
             
         Returns:
             RealtimeQuote 对象，获取失败返回 None
@@ -568,6 +694,8 @@ class AkshareFetcher(BaseFetcher):
             return self._get_hk_realtime_quote(stock_code)
         elif _is_etf_code(stock_code):
             return self._get_etf_realtime_quote(stock_code)
+        elif _is_open_fund_code(stock_code):
+            return self._get_open_fund_realtime_quote(stock_code)
         else:
             return self._get_stock_realtime_quote(stock_code)
     
@@ -838,6 +966,88 @@ class AkshareFetcher(BaseFetcher):
             
         except Exception as e:
             logger.error(f"[API错误] 获取港股 {stock_code} 实时行情失败: {e}")
+            return None
+    
+    def _get_open_fund_realtime_quote(self, fund_code: str) -> Optional[RealtimeQuote]:
+        """
+        获取场外开放式基金实时净值数据
+        
+        数据来源：ak.fund_open_fund_daily_em()
+        包含：基金名称、单位净值、日增长率等
+        
+        注意：场外基金没有实时交易行情，只有每日净值
+        
+        Args:
+            fund_code: 场外基金代码，如 '020973'
+            
+        Returns:
+            RealtimeQuote 对象，获取失败返回 None
+        """
+        import akshare as ak
+        
+        try:
+            # 防封禁策略
+            self._set_random_user_agent()
+            self._enforce_rate_limit()
+            
+            logger.info(f"[API调用] ak.fund_open_fund_daily_em() 获取场外基金实时净值...")
+            import time as _time
+            api_start = _time.time()
+            
+            df = ak.fund_open_fund_daily_em()
+            
+            api_elapsed = _time.time() - api_start
+            logger.info(f"[API返回] ak.fund_open_fund_daily_em 成功: 返回 {len(df)} 只基金, 耗时 {api_elapsed:.2f}s")
+            
+            # 查找指定基金
+            row = df[df['基金代码'] == fund_code]
+            if row.empty:
+                logger.warning(f"[API返回] 未找到场外基金 {fund_code} 的净值数据")
+                return None
+            
+            row = row.iloc[0]
+            
+            # 安全获取字段值
+            def safe_float(val, default=0.0):
+                try:
+                    if pd.isna(val):
+                        return default
+                    # 处理可能的百分比字符串
+                    if isinstance(val, str):
+                        val = val.replace('%', '')
+                    return float(val)
+                except:
+                    return default
+            
+            # 场外基金行情数据构建
+            # 原始列：基金代码, 基金简称, 单位净值-今日, 累计净值, 日增长率, 申购状态, 赎回状态
+            fund_name = str(row.get('基金简称', f'基金{fund_code}'))
+            nav = safe_float(row.get('单位净值', row.get('单位净值-今日', 0)))
+            change_pct = safe_float(row.get('日增长率', 0))
+            
+            quote = RealtimeQuote(
+                code=fund_code,
+                name=fund_name,
+                price=nav,  # 使用单位净值作为价格
+                change_pct=change_pct,
+                change_amount=0.0,  # 场外基金无涨跌额
+                volume_ratio=0.0,   # 场外基金无量比
+                turnover_rate=0.0,  # 场外基金无换手率
+                amplitude=0.0,      # 场外基金无振幅
+                pe_ratio=0.0,       # 场外基金无市盈率
+                pb_ratio=0.0,       # 场外基金无市净率
+                total_mv=0.0,       # 场外基金无总市值（需另外获取）
+                circ_mv=0.0,
+                change_60d=0.0,
+                high_52w=0.0,
+                low_52w=0.0,
+            )
+            
+            logger.info(f"[场外基金净值] {fund_code} {quote.name}: 净值={quote.price}, 日增长率={quote.change_pct}%")
+            return quote
+            
+        except Exception as e:
+            logger.error(f"[API错误] 获取场外基金 {fund_code} 净值失败: {e}")
             return None
     
     def get_chip_distribution(self, stock_code: str) -> Optional[ChipDistribution]:
