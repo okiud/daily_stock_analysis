@@ -1020,9 +1020,17 @@ class AkshareFetcher(BaseFetcher):
                     return default
             
             # 场外基金行情数据构建
-            # 原始列：基金代码, 基金简称, 单位净值-今日, 累计净值, 日增长率, 申购状态, 赎回状态
+            # 列名格式：基金代码, 基金简称, YYYY-MM-DD-单位净值, YYYY-MM-DD-累计净值, 日增长率, 申购状态, 赎回状态
+            # 需要动态查找包含'单位净值'的列
             fund_name = str(row.get('基金简称', f'基金{fund_code}'))
-            nav = safe_float(row.get('单位净值', row.get('单位净值-今日', 0)))
+            
+            # 查找单位净值列（列名包含'单位净值'）
+            nav = 0.0
+            for col in row.index:
+                if '单位净值' in str(col):
+                    nav = safe_float(row.get(col, 0))
+                    break
+            
             change_pct = safe_float(row.get('日增长率', 0))
             
             quote = RealtimeQuote(
