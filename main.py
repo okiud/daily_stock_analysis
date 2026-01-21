@@ -748,6 +748,19 @@ def parse_arguments() -> argparse.Namespace:
         help='仅启动 WebUI 服务，不自动执行分析（通过 /analysis API 手动触发）'
     )
     
+    # === 加密货币分析模式 ===
+    parser.add_argument(
+        '--crypto',
+        action='store_true',
+        help='启用加密货币分析模式（分析 BTC 等加密货币）'
+    )
+    
+    parser.add_argument(
+        '--symbols',
+        type=str,
+        help='指定要分析的加密货币，逗号分隔（如 BTC-USD,ETH-USD）'
+    )
+    
     return parser.parse_args()
 
 
@@ -971,6 +984,49 @@ def main() -> int:
                 analyzer = GeminiAnalyzer(api_key=config.gemini_api_key)
             
             run_market_review(notifier, analyzer, search_service)
+            return 0
+        
+        # 模式2: 加密货币分析模式
+        if args.crypto:
+            logger.info("模式: 加密货币分析")
+            
+            from crypto_analyzer import CryptoAnalyzer
+            
+            # 解析加密货币符号列表
+            crypto_symbols = None
+            if args.symbols:
+                crypto_symbols = [s.strip() for s in args.symbols.split(',') if s.strip()]
+                logger.info(f"使用命令行指定的加密货币: {crypto_symbols}")
+            else:
+                crypto_symbols = config.crypto_list
+                logger.info(f"使用配置文件的加密货币: {crypto_symbols}")
+            
+            # 初始化搜索服务
+            search_service = None
+            if config.bocha_api_keys or config.tavily_api_keys or config.serpapi_keys:
+                search_service = SearchService(
+                    bocha_keys=config.bocha_api_keys,
+                    tavily_keys=config.tavily_api_keys,
+                    serpapi_keys=config.serpapi_keys
+                )
+            
+            # 初始化 AI 分析器
+            analyzer = None
+            if config.gemini_api_key or config.openai_api_key:
+                analyzer = GeminiAnalyzer()
+            
+            # 运行加密货币分析
+            crypto_analyzer = CryptoAnalyzer(
+                analyzer=analyzer,
+                search_service=search_service
+            )
+            
+            results = crypto_analyzer.run(
+                symbols=crypto_symbols,
+                send_notification=not args.no_notify
+            )
+            
+            logger.info(f"\n加密货币分析完成，共分析 {len(results)} 个币种")
             return 0
         
         # 模式2: 定时任务模式

@@ -1,6 +1,6 @@
 # 📖 完整配置与部署指南
 
-本文档包含 A股智能分析系统的完整配置说明，适合需要高级功能或特殊部署方式的用户。
+本文档包含 A股智能分析系统的完整配置说明，支持 **A股、港股、加密货币** 分析。
 
 > 💡 快速上手请参考 [README.md](../README.md)，本文档为进阶配置。
 
@@ -76,7 +76,7 @@
 
 1. **AI 模型**：`GEMINI_API_KEY`（推荐）或 `OPENAI_API_KEY`
 2. **通知渠道**：至少配置一个，如 `WECHAT_WEBHOOK_URL` 或 `EMAIL_SENDER` + `EMAIL_PASSWORD`
-3. **股票列表**：`STOCK_LIST`（必填）
+3. **股票列表**：`STOCK_LIST`（必填），加密货币可选 `CRYPTO_LIST`
 4. **搜索 API**：`TAVILY_API_KEYS`（强烈推荐，用于新闻搜索）
 
 > 💡 配置完以上 4 项即可开始使用！
@@ -165,6 +165,7 @@
 | 变量名 | 说明 | 默认值 |
 |--------|------|--------|
 | `STOCK_LIST` | 自选股代码（逗号分隔） | - |
+| `CRYPTO_LIST` | 加密货币列表（如 `BTC-USD,ETH-USD`） | - |
 | `MAX_WORKERS` | 并发线程数 | `3` |
 | `MARKET_REVIEW_ENABLED` | 启用大盘复盘 | `true` |
 | `SCHEDULE_ENABLED` | 启用定时任务 | `false` |
@@ -284,10 +285,17 @@ pip install -r requirements.txt
 ### 命令行参数
 
 ```bash
+# A股分析
 python main.py                        # 完整分析（个股 + 大盘复盘）
 python main.py --market-review        # 仅大盘复盘
 python main.py --no-market-review     # 仅个股分析
 python main.py --stocks 600519,300750 # 指定股票
+
+# 加密货币分析
+python main.py --crypto               # 分析配置的加密货币
+python main.py --crypto --symbols BTC,ETH  # 指定加密货币
+
+# 通用参数
 python main.py --dry-run              # 仅获取数据，不 AI 分析
 python main.py --no-notify            # 不发送推送
 python main.py --schedule             # 定时任务模式
@@ -417,6 +425,37 @@ PUSHOVER_API_TOKEN=your_api_token
 ### YFinance
 - 免费，无需配置
 - 支持美股/港股数据
+
+---
+
+## 加密货币分析
+
+### 支持的加密货币
+
+BTC、ETH、SOL、BNB、XRP 等主流币种，数据源：Binance > OKX > CoinGecko > YFinance（自动故障切换）
+
+### 使用方式
+
+```bash
+# 使用 --crypto 启用加密货币模式
+python main.py --crypto --symbols BTC,ETH
+
+# 或在 .env 中配置 CRYPTO_LIST
+CRYPTO_LIST=BTC-USD,ETH-USD
+python main.py --crypto
+```
+
+### 量化指标
+
+加密货币分析提供完整的量化指标：
+- **动量指标**：RSI、MACD、趋势强度
+- **波动指标**：布林带、ATR
+- **资金流向**：主动买入占比、资金净流入/流出
+- **支撑阻力**：20日高低点
+
+### 报告示例
+
+分析报告包含具体的买入/卖出点位建议、止损位、目标位和风险收益比。
 
 ---
 

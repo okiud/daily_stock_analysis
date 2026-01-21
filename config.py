@@ -30,6 +30,9 @@ class Config:
     
     # === 自选股配置 ===
     stock_list: List[str] = field(default_factory=list)
+    
+    # === 加密货币配置 ===
+    crypto_list: List[str] = field(default_factory=list)  # 如 ["BTC-USD", "ETH-USD"]
 
     # === 飞书云文档配置 ===
     feishu_app_id: Optional[str] = None
@@ -179,8 +182,15 @@ class Config:
         serpapi_keys_str = os.getenv('SERPAPI_API_KEYS', '')
         serpapi_keys = [k.strip() for k in serpapi_keys_str.split(',') if k.strip()]
         
+        # 解析加密货币列表
+        crypto_list_str = os.getenv('CRYPTO_LIST', '')
+        crypto_list = [c.strip() for c in crypto_list_str.split(',') if c.strip()]
+        if not crypto_list:
+            crypto_list = ['BTC-USD']  # 默认分析 BTC
+        
         return cls(
             stock_list=stock_list,
+            crypto_list=crypto_list,
             feishu_app_id=os.getenv('FEISHU_APP_ID'),
             feishu_app_secret=os.getenv('FEISHU_APP_SECRET'),
             feishu_folder_token=os.getenv('FEISHU_FOLDER_TOKEN'),

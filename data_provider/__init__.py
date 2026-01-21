@@ -15,6 +15,9 @@
 3. TushareFetcher (Priority 2) - 来自 tushare 库
 4. BaostockFetcher (Priority 3) - 来自 baostock 库
 5. YfinanceFetcher (Priority 4) - 来自 yfinance 库
+
+加密货币数据源：
+- CryptoFetcher - 使用 yfinance 获取 BTC-USD 等加密货币数据
 """
 
 from .base import BaseFetcher, DataFetcherManager
@@ -23,6 +26,7 @@ from .akshare_fetcher import AkshareFetcher
 from .tushare_fetcher import TushareFetcher
 from .baostock_fetcher import BaostockFetcher
 from .yfinance_fetcher import YfinanceFetcher
+from .crypto_fetcher import CryptoFetcher
 
 __all__ = [
     'BaseFetcher',
@@ -32,4 +36,6 @@ __all__ = [
     'TushareFetcher',
     'BaostockFetcher',
     'YfinanceFetcher',
+    'CryptoFetcher',
 ]
+
